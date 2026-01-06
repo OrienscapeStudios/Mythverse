@@ -1,9 +1,11 @@
 *.log
+*.crowdin
 
 /logs
 /moddata
 /saves
 /stackdeobf_mappings
+/.voxy
 /.cache
 /.fabric
 /.mixin.out
@@ -11,12 +13,16 @@
 /crash-reports
 /debug
 /downloads
+/journeymap
+/screenshots
 
-/journeymap/data
-/journeymap/icon
+/config/mod_observer
+/config/xaero
 
 /command_history.txt
 /realms_persistence.json
 /servers.dat_old
 /usercache.json
-mods/reactivemusic-1.0.3+1.21.jar
+/mods/reactivemusic-1.0.3+1.21.jar
+/xaero/
+/XaeroWaypoints_BACKUP24080/
