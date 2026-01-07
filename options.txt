@@ -63,7 +63,7 @@ damageTiltStrength:1.0
 highContrast:false
 highContrastBlockOutline:false
 narratorHotkey:true
-resourcePacks:["vanilla","continuity:default","continuity:glass_pane_culling_fix","black_icons","holdmyitems:pack_test"]
+resourcePacks:["vanilla","continuity:default","continuity:glass_pane_culling_fix","black_icons"]
 incompatibleResourcePacks:[]
 lastServer:orienscape.falixsrv.me
 lang:en_us
