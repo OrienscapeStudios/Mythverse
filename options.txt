@@ -63,7 +63,7 @@ damageTiltStrength:1.0
 highContrast:false
 highContrastBlockOutline:false
 narratorHotkey:true
-resourcePacks:["vanilla","continuity:default","continuity:glass_pane_culling_fix","black_icons"]
+resourcePacks:["vanilla","continuity:glass_pane_culling_fix","black_icons","continuity:default"]
 incompatibleResourcePacks:[]
 lastServer:orienscape.falixsrv.me
 lang:en_us
@@ -170,9 +170,10 @@ key_key.dynamic_fps.toggle_disabled:key.keyboard.unknown
 key_key.fabrishot.screenshot:key.keyboard.f9
 key_key.entityculling.toggle:key.keyboard.unknown
 key_key.entityculling.toggleBoxes:key.keyboard.unknown
+key_key.firstperson.toggle:key.keyboard.unknown
 key_key.modmenu.open_menu:key.keyboard.unknown
 key_key.optigui.inspect:key.keyboard.f12
-key_key.renderscale.options:key.keyboard.o
+key_key.renderscale.options:key.keyboard.unknown
 key_key.shouldersurfing.adjust_camera_left:key.keyboard.left
 key_key.shouldersurfing.adjust_camera_right:key.keyboard.right
 key_key.shouldersurfing.adjust_camera_in:key.keyboard.up
@@ -200,9 +201,9 @@ key_key.voice_chat_toggle_recording:key.keyboard.unknown
 key_key.voice_chat_adjust_volumes:key.keyboard.unknown
 key_zoomify.key.zoom:key.keyboard.c
 key_zoomify.key.zoom.secondary:key.keyboard.f6
-key_iris.keybind.reload:key.keyboard.r
-key_iris.keybind.toggleShaders:key.keyboard.k
-key_iris.keybind.shaderPackSelection:key.keyboard.o
+key_iris.keybind.reload:key.keyboard.unknown
+key_iris.keybind.toggleShaders:key.keyboard.unknown
+key_iris.keybind.shaderPackSelection:key.keyboard.unknown
 key_iris.keybind.wireframe:key.keyboard.unknown
 key_lambdynlights.key.toggle_fps_dynamic_lighting:key.keyboard.unknown
 soundCategory_master:0.902317880794702

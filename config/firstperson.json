@@ -1,13 +1,13 @@
 {
   "configVersion": 2,
   "enabledByDefault": true,
-  "xOffset": 0,
-  "sneakXOffset": 0,
+  "xOffset": 8,
+  "sneakXOffset": 8,
   "sitXOffset": 0,
   "renderStuckFeatures": true,
-  "vanillaHandsMode": "ALL",
-  "dynamicMode": false,
-  "vanillaHandsSkipSwimming": false,
+  "vanillaHandsMode": "OFF",
+  "dynamicMode": true,
+  "vanillaHandsSkipSwimming": true,
   "autoVanillaHands": [
     "create:potato_cannon",
     "create:handheld_worldshaper",
