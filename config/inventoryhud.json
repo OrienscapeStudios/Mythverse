@@ -69,7 +69,7 @@
   "arm_bars": false,
   "show_count": false,
   "show_arrows_without_weapon": true,
-  "arm_with_debug": true,
+  "arm_with_debug": false,
   "arm_x": 0,
   "arm_y": 70,
   "arm_above": 100,
