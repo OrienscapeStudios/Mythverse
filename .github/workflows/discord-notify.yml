@@ -3,21 +3,89 @@ name: Discord Commit Notification
 on:
   push:
     branches:
-      - "**"
+      - '**'  # Trigger di semua branch
 
 jobs:
-  notify:
+  notify-discord:
+    name: Send Discord Notification
     runs-on: ubuntu-latest
+
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get commit info
+        id: commit_info
+        run: |
+          COMMIT_SHA="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT_SHA:0:7}"
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          COMMIT_AUTHOR=$(git log -1 --pretty=format:"%an")
+          FILES_CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | wc -l || echo "1")
+          BRANCH="${{ github.ref_name }}"
+          REPO_NAME="${{ github.event.repository.name }}"
+          COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
+          COMPARE_URL="${{ github.server_url }}/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.sha }}"
+
+          if [[ "$BRANCH" == "master" ]]; then
+            COLOR=5763719
+          elif [[ "$BRANCH" == "dev" ]]; then
+            COLOR=3447003
+          elif [[ "$BRANCH" == release/* ]]; then
+            COLOR=15105570
+          elif [[ "$BRANCH" == hotfix/* ]]; then
+            COLOR=15548997
+          else
+            COLOR=10070709
+          fi
+
+          echo "commit_short=$COMMIT_SHORT" >> $GITHUB_OUTPUT
+          echo "commit_msg=$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "commit_author=$COMMIT_AUTHOR" >> $GITHUB_OUTPUT
+          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
+          echo "commit_url=$COMMIT_URL" >> $GITHUB_OUTPUT
+          echo "compare_url=$COMPARE_URL" >> $GITHUB_OUTPUT
+          echo "color=$COLOR" >> $GITHUB_OUTPUT
+
       - name: Send Discord Notification
         env:
-          WEBHOOK: https://discord.com/api/webhooks/1473742973652045906/IEkrk0cS1ctvGUuBCKHxR23t2S_y0r2MSI6Jy6ukXNZZpdvlydzQUxz9Al8yzJIsJX4h
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          MSG="🚀 New push on $GITHUB_REPOSITORY"
-          MSG="$MSG\nBranch: ${GITHUB_REF##*/}"
-          MSG="$MSG\nAuthor: $GITHUB_ACTOR"
-          MSG="$MSG\nCommit: $GITHUB_SHA"
+          PAYLOAD=$(cat <<EOF
+          {
+            "embeds": [{
+              "title": "📦 New Commit — ${{ steps.commit_info.outputs.repo_name }}",
+              "url": "${{ steps.commit_info.outputs.commit_url }}",
+              "color": ${{ steps.commit_info.outputs.color }},
+              "description": "\`\`\`${{ steps.commit_info.outputs.commit_msg }}\`\`\`",
+              "fields": [
+                { "name": "🌿 Branch", "value": "\`${{ steps.commit_info.outputs.branch }}\`", "inline": true },
+                { "name": "📝 Commit", "value": "[\`${{ steps.commit_info.outputs.commit_short }}\`](${{ steps.commit_info.outputs.commit_url }})", "inline": true },
+                { "name": "📁 Files Changed", "value": "\`${{ steps.commit_info.outputs.files_changed }} file(s)\`", "inline": true },
+                { "name": "👤 Author", "value": "${{ steps.commit_info.outputs.commit_author }}", "inline": true },
+                { "name": "🔗 Compare", "value": "[View Diff](${{ steps.commit_info.outputs.compare_url }})", "inline": true }
+              ],
+              "footer": { "text": "GitHub Actions • ${{ github.repository }}" },
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            }],
+            "username": "GitHub Notifier",
+            "avatar_url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+          }
+          EOF
+          )
 
-          curl -H "Content-Type: application/json" \
-          -d "{\\"content\\":\"$MSG\"}" \
-          $WEBHOOK
+          HTTP_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$DISCORD_WEBHOOK_URL")
+
+          if [ "$HTTP_RESPONSE" -eq 204 ]; then
+            echo "✅ Discord notification sent!"
+          else
+            echo "❌ Failed. HTTP: $HTTP_RESPONSE"
+            exit 1
+          fi
