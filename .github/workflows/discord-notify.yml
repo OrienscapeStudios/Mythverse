@@ -1,0 +1,23 @@
+name: Discord Commit Notification
+
+on:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord Notification
+        env:
+          WEBHOOK: https://discord.com/api/webhooks/1473742973652045906/IEkrk0cS1ctvGUuBCKHxR23t2S_y0r2MSI6Jy6ukXNZZpdvlydzQUxz9Al8yzJIsJX4h
+        run: |
+          MSG="🚀 New push on $GITHUB_REPOSITORY"
+          MSG="$MSG\nBranch: ${GITHUB_REF##*/}"
+          MSG="$MSG\nAuthor: $GITHUB_ACTOR"
+          MSG="$MSG\nCommit: $GITHUB_SHA"
+
+          curl -H "Content-Type: application/json" \
+          -d "{\\"content\\":\"$MSG\"}" \
+          $WEBHOOK
