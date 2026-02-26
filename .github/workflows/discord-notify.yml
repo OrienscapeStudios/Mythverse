@@ -58,7 +58,7 @@ jobs:
           PAYLOAD=$(cat <<EOF
           {
             "embeds": [{
-              "title": "📦 New Commit — ${{ steps.commit_info.outputs.repo_name }}",
+              "title": "${{ steps.commit_info.outputs.repo_name }}",
               "url": "${{ steps.commit_info.outputs.commit_url }}",
               "color": ${{ steps.commit_info.outputs.color }},
               "description": "\`\`\`${{ steps.commit_info.outputs.commit_msg }}\`\`\`",
