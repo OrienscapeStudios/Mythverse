@@ -54,9 +54,14 @@ jobs:
       - name: Send Discord Notification
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Ambil Role ID dari secrets (atau tulis langsung jika mau)
+          ROLE_ID: ${{ secrets.DISCORD_ROLE_ID }} 
         run: |
-          # Menggunakan jq untuk merakit JSON agar karakter spesial otomatis di-escape
+          # Menyusun mention string
+          MENTION="<@&$ROLE_ID>"
+
           PAYLOAD=$(jq -n \
+            --arg mention "$MENTION" \
             --arg repo_name "${{ steps.commit_info.outputs.repo_name }}" \
             --arg commit_url "${{ steps.commit_info.outputs.commit_url }}" \
             --arg color "${{ steps.commit_info.outputs.color }}" \
@@ -71,6 +76,7 @@ jobs:
             '{
               "username": "GitHub Notifier",
               "avatar_url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+              "content": $mention,
               "embeds": [{
                 "title": $repo_name,
                 "url": $commit_url,
@@ -88,15 +94,4 @@ jobs:
               }]
             }')
 
-          HTTP_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD" \
-            "$DISCORD_WEBHOOK_URL")
-
-          if [ "$HTTP_RESPONSE" -eq 204 ]; then
-            echo "✅ Discord notification sent!"
-          else
-            echo "❌ Failed. HTTP: $HTTP_RESPONSE"
-            echo "📝 Debug Payload: $PAYLOAD" # Membantu melihat JSON yang gagal terkirim
-            exit 1
-          fi
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
