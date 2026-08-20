@@ -14,20 +14,69 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0  # full history, perlu buat range commit
 
       - name: Get commit info
         id: commit_info
         run: |
           COMMIT_SHA="${{ github.sha }}"
           COMMIT_SHORT="${COMMIT_SHA:0:7}"
-          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
-          COMMIT_AUTHOR=$(git log -1 --pretty=format:"%an")
-          FILES_CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | wc -l || echo "1")
           BRANCH="${{ github.ref_name }}"
           REPO_NAME="${{ github.event.repository.name }}"
-          COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
-          COMPARE_URL="${{ github.server_url }}/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.sha }}"
+          REPO_URL="${{ github.server_url }}/${{ github.repository }}"
+          COMMIT_URL="${REPO_URL}/commit/${COMMIT_SHA}"
+          BEFORE_SHA="${{ github.event.before }}"
+          ZERO_SHA="0000000000000000000000000000000000000000"
+
+          # Deteksi push pertama / branch baru / force-push tak valid
+          if [[ "$BEFORE_SHA" == "$ZERO_SHA" ]] || ! git cat-file -e "$BEFORE_SHA" 2>/dev/null; then
+            RANGE_LOG="-1 $COMMIT_SHA"
+            COMPARE_URL="${REPO_URL}/commits/${COMMIT_SHA}"
+            IS_FRESH=true
+          else
+            RANGE_LOG="${BEFORE_SHA}..${COMMIT_SHA}"
+            COMPARE_URL="${REPO_URL}/compare/${BEFORE_SHA}...${COMMIT_SHA}"
+            IS_FRESH=false
+          fi
+
+          # Total commit dalam range
+          if [[ "$IS_FRESH" == true ]]; then
+            TOTAL_COMMITS=1
+          else
+            TOTAL_COMMITS=$(git rev-list --count "$RANGE_LOG" 2>/dev/null || echo 1)
+          fi
+
+          # Files changed dalam range
+          if [[ "$IS_FRESH" == true ]]; then
+            FILES_CHANGED=$(git diff --name-only "${COMMIT_SHA}~1" "$COMMIT_SHA" 2>/dev/null | wc -l || echo 1)
+          else
+            FILES_CHANGED=$(git diff --name-only "$RANGE_LOG" 2>/dev/null | wc -l || echo 0)
+          fi
+
+          # Build list commit (subject line only, per commit, max 10 baris)
+          MAX_LINES=10
+          COMMIT_LIST=""
+          LINE_COUNT=0
+
+          while IFS=$'\x1f' read -r c_hash c_subject c_author; do
+            [[ -z "$c_hash" ]] && continue
+            LINE_COUNT=$((LINE_COUNT + 1))
+            if [[ $LINE_COUNT -le $MAX_LINES ]]; then
+              SHORT="${c_hash:0:7}"
+              LINE="[\`${SHORT}\`](${REPO_URL}/commit/${c_hash}) ${c_subject} — ${c_author}"
+              COMMIT_LIST="${COMMIT_LIST}${LINE}"$'\n'
+            fi
+          done < <(git log --pretty=format:"%H%x1f%s%x1f%an" $RANGE_LOG 2>/dev/null)
+
+          if [[ $TOTAL_COMMITS -gt $MAX_LINES ]]; then
+            REMAINING=$((TOTAL_COMMITS - MAX_LINES))
+            COMMIT_LIST="${COMMIT_LIST}"$'\n'"_...and ${REMAINING} more commit(s)_"
+          fi
+
+          # Fallback kalau list kosong (safety net)
+          if [[ -z "$COMMIT_LIST" ]]; then
+            COMMIT_LIST="No commit details available."
+          fi
 
           if [[ "$BRANCH" == "master" ]]; then
             COLOR=5763719
@@ -41,23 +90,29 @@ jobs:
             COLOR=10070709
           fi
 
-          echo "commit_short=$COMMIT_SHORT" >> $GITHUB_OUTPUT
-          echo "commit_msg=$COMMIT_MSG" >> $GITHUB_OUTPUT
-          echo "commit_author=$COMMIT_AUTHOR" >> $GITHUB_OUTPUT
-          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
-          echo "commit_url=$COMMIT_URL" >> $GITHUB_OUTPUT
-          echo "compare_url=$COMPARE_URL" >> $GITHUB_OUTPUT
-          echo "color=$COLOR" >> $GITHUB_OUTPUT
+          {
+            echo "commit_short=$COMMIT_SHORT"
+            echo "branch=$BRANCH"
+            echo "repo_name=$REPO_NAME"
+            echo "commit_url=$COMMIT_URL"
+            echo "compare_url=$COMPARE_URL"
+            echo "color=$COLOR"
+            echo "total_commits=$TOTAL_COMMITS"
+            echo "files_changed=$FILES_CHANGED"
+          } >> $GITHUB_OUTPUT
+
+          # Multi-line output butuh delimiter khusus
+          {
+            echo "commit_list<<COMMITLIST_EOF"
+            echo "$COMMIT_LIST"
+            echo "COMMITLIST_EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Send Discord Notification
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          # Ambil Role ID dari secrets (atau tulis langsung jika mau)
-          ROLE_ID: ${{ secrets.DISCORD_ROLE_ID }} 
+          ROLE_ID: ${{ secrets.DISCORD_ROLE_ID }}
         run: |
-          # Menyusun mention string
           MENTION="<@&$ROLE_ID>"
 
           PAYLOAD=$(jq -n \
@@ -65,11 +120,11 @@ jobs:
             --arg repo_name "${{ steps.commit_info.outputs.repo_name }}" \
             --arg commit_url "${{ steps.commit_info.outputs.commit_url }}" \
             --arg color "${{ steps.commit_info.outputs.color }}" \
-            --arg commit_msg "\`\`\`${{ steps.commit_info.outputs.commit_msg }}\`\`\`" \
+            --arg commit_list "${{ steps.commit_info.outputs.commit_list }}" \
             --arg branch "\`${{ steps.commit_info.outputs.branch }}\`" \
-            --arg commit_short "[\`${{ steps.commit_info.outputs.commit_short }}\`](${{ steps.commit_info.outputs.commit_url }})" \
+            --arg total_commits "\`${{ steps.commit_info.outputs.total_commits }} commit(s)\`" \
             --arg files_changed "\`${{ steps.commit_info.outputs.files_changed }} file(s)\`" \
-            --arg author "${{ steps.commit_info.outputs.commit_author }}" \
+            --arg pushed_by "${{ github.actor }}" \
             --arg compare "[View Diff](${{ steps.commit_info.outputs.compare_url }})" \
             --arg footer "GitHub Actions • ${{ github.repository }}" \
             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -81,12 +136,12 @@ jobs:
                 "title": $repo_name,
                 "url": $commit_url,
                 "color": ($color | tonumber),
-                "description": $commit_msg,
+                "description": $commit_list,
                 "fields": [
                   { "name": "🌿 Branch", "value": $branch, "inline": true },
-                  { "name": "📝 Commit", "value": $commit_short, "inline": true },
+                  { "name": "📝 Commits", "value": $total_commits, "inline": true },
                   { "name": "📁 Files Changed", "value": $files_changed, "inline": true },
-                  { "name": "👤 Author", "value": $author, "inline": true },
+                  { "name": "🚀 Pushed by", "value": $pushed_by, "inline": true },
                   { "name": "🔗 Compare", "value": $compare, "inline": true }
                 ],
                 "footer": { "text": $footer },
