@@ -41,22 +41,40 @@ jobs:
 
           # Total commit dalam range
           if [[ "$IS_FRESH" == true ]]; then
-            TOTAL_COMMITS=1
+            TOTAL_COMMITS=$(git rev-list --count -1 "$COMMIT_SHA" 2>/dev/null || echo 1)
           else
             TOTAL_COMMITS=$(git rev-list --count "$RANGE_LOG" 2>/dev/null || echo 1)
           fi
 
           # Files changed dalam range
           if [[ "$IS_FRESH" == true ]]; then
-            FILES_CHANGED=$(git diff --name-only "${COMMIT_SHA}~1" "$COMMIT_SHA" 2>/dev/null | wc -l || echo 1)
+            if git cat-file -e "${COMMIT_SHA}~1" 2>/dev/null; then
+              FILES_CHANGED=$(git diff --name-only "${COMMIT_SHA}~1" "$COMMIT_SHA" 2>/dev/null | wc -l)
+            else
+              FILES_CHANGED=$(git show --name-only --pretty=format: "$COMMIT_SHA" 2>/dev/null | grep -c .)
+            fi
           else
             FILES_CHANGED=$(git diff --name-only "$RANGE_LOG" 2>/dev/null | wc -l || echo 0)
           fi
+
+          echo "::group::Debug range info"
+          echo "IS_FRESH=$IS_FRESH RANGE_LOG=[$RANGE_LOG] BEFORE_SHA=$BEFORE_SHA COMMIT_SHA=$COMMIT_SHA"
+          echo "::endgroup::"
 
           # Build list commit (subject line only, per commit, max 10 baris)
           MAX_LINES=10
           COMMIT_LIST=""
           LINE_COUNT=0
+
+          if [[ "$IS_FRESH" == true ]]; then
+            LOG_SOURCE=$(git log --pretty=format:"%H%x1f%s%x1f%an" -1 "$COMMIT_SHA" 2>/dev/null)
+          else
+            LOG_SOURCE=$(git log --pretty=format:"%H%x1f%s%x1f%an" "$RANGE_LOG" 2>/dev/null)
+          fi
+
+          echo "::group::Debug LOG_SOURCE raw"
+          printf '%s\n' "$LOG_SOURCE"
+          echo "::endgroup::"
 
           while IFS=$'\x1f' read -r c_hash c_subject c_author; do
             [[ -z "$c_hash" ]] && continue
@@ -66,7 +84,7 @@ jobs:
               LINE="[\`${SHORT}\`](${REPO_URL}/commit/${c_hash}) ${c_subject} — ${c_author}"
               COMMIT_LIST="${COMMIT_LIST}${LINE}"$'\n'
             fi
-          done < <(git log --pretty=format:"%H%x1f%s%x1f%an" $RANGE_LOG 2>/dev/null)
+          done < <(printf '%s\n' "$LOG_SOURCE")
 
           if [[ $TOTAL_COMMITS -gt $MAX_LINES ]]; then
             REMAINING=$((TOTAL_COMMITS - MAX_LINES))
@@ -112,21 +130,35 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           ROLE_ID: ${{ secrets.DISCORD_ROLE_ID }}
+          REPO_NAME: ${{ steps.commit_info.outputs.repo_name }}
+          COMMIT_URL: ${{ steps.commit_info.outputs.commit_url }}
+          COLOR: ${{ steps.commit_info.outputs.color }}
+          COMMIT_LIST: ${{ steps.commit_info.outputs.commit_list }}
+          BRANCH: ${{ steps.commit_info.outputs.branch }}
+          TOTAL_COMMITS: ${{ steps.commit_info.outputs.total_commits }}
+          FILES_CHANGED: ${{ steps.commit_info.outputs.files_changed }}
+          PUSHED_BY: ${{ github.actor }}
+          COMPARE_URL: ${{ steps.commit_info.outputs.compare_url }}
+          REPO_FULL: ${{ github.repository }}
         run: |
           MENTION="<@&$ROLE_ID>"
 
+          echo "::group::Debug commit_list raw"
+          echo "$COMMIT_LIST"
+          echo "::endgroup::"
+
           PAYLOAD=$(jq -n \
             --arg mention "$MENTION" \
-            --arg repo_name "${{ steps.commit_info.outputs.repo_name }}" \
-            --arg commit_url "${{ steps.commit_info.outputs.commit_url }}" \
-            --arg color "${{ steps.commit_info.outputs.color }}" \
-            --arg commit_list "${{ steps.commit_info.outputs.commit_list }}" \
-            --arg branch "\`${{ steps.commit_info.outputs.branch }}\`" \
-            --arg total_commits "\`${{ steps.commit_info.outputs.total_commits }} commit(s)\`" \
-            --arg files_changed "\`${{ steps.commit_info.outputs.files_changed }} file(s)\`" \
-            --arg pushed_by "${{ github.actor }}" \
-            --arg compare "[View Diff](${{ steps.commit_info.outputs.compare_url }})" \
-            --arg footer "GitHub Actions • ${{ github.repository }}" \
+            --arg repo_name "$REPO_NAME" \
+            --arg commit_url "$COMMIT_URL" \
+            --arg color "$COLOR" \
+            --arg commit_list "$COMMIT_LIST" \
+            --arg branch "\`$BRANCH\`" \
+            --arg total_commits "\`$TOTAL_COMMITS commit(s)\`" \
+            --arg files_changed "\`$FILES_CHANGED file(s)\`" \
+            --arg pushed_by "$PUSHED_BY" \
+            --arg compare "[View Diff]($COMPARE_URL)" \
+            --arg footer "GitHub Actions • $REPO_FULL" \
             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '{
               "username": "GitHub Notifier",
