@@ -1,0 +1,85 @@
+name: Automated Release & Packaging
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Package and Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Extract Tag Name
+        id: get_tag
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          if [ -z "$TAG" ] || [ "$TAG" = "$GITHUB_REF" ]; then
+            TAG="build-$(date +'%Y%m%d%H%M%S')"
+          fi
+          echo "TAG_NAME=$TAG" >> $GITHUB_ENV
+          echo "ZIP_NAME=Release-Asset-${TAG}.zip" >> $GITHUB_ENV
+
+      - name: Package Directory with Exclusions
+        run: |
+          # 1. Tentukan folder dan ekstensi yang ingin dikecualikan
+          EXCLUDES=(
+            # Internal & Git
+            "*.git*"
+            "*.github*"
+            "*.gitignore"
+            
+            # File system & Editor
+            ".vscode/*"
+            ".idea/*"
+            "Thumbs.db"
+            ".DS_Store"
+
+            # Folder kerja / source mentah
+            "raw_assets/*"
+            "temp/*"
+            "logs/*"
+            "build_cache/*"
+
+            # Ekstensi file mentah & sementara
+            "*.psd"
+            "*.blend1"
+            "*.tmp"
+            "*.log"
+            "*.bak"
+          )
+
+          # 2. Susun flag -x untuk setiap item
+          EXCLUDE_FLAGS=()
+          for item in "${EXCLUDES[@]}"; do
+            EXCLUDE_FLAGS+=(-x "$item")
+          done
+
+          # 3. Eksekusi kompresi
+          zip -r "$ZIP_NAME" . "${EXCLUDE_FLAGS[@]}"
+
+      - name: Generate SHA256 Checksum
+        run: |
+          sha256sum "$ZIP_NAME" > checksum.txt
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: Release ${{ env.TAG_NAME }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            ${{ env.ZIP_NAME }}
+            checksum.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
