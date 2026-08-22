@@ -44,10 +44,9 @@ jobs:
             ".DS_Store"
 
             # Folder kerja / source mentah
-            "raw_assets/*"
-            "temp/*"
-            "logs/*"
-            "build_cache/*"
+            "Raw Assets/*"
+            "Temp/*"
+            "Logs/*"
 
             # Ekstensi file mentah & sementara
             "*.psd"

@@ -57,45 +57,6 @@ jobs:
             FILES_CHANGED=$(git diff --name-only "$RANGE_LOG" 2>/dev/null | wc -l || echo 0)
           fi
 
-          echo "::group::Debug range info"
-          echo "IS_FRESH=$IS_FRESH RANGE_LOG=[$RANGE_LOG] BEFORE_SHA=$BEFORE_SHA COMMIT_SHA=$COMMIT_SHA"
-          echo "::endgroup::"
-
-          # Build list commit (subject line only, per commit, max 10 baris)
-          MAX_LINES=10
-          COMMIT_LIST=""
-          LINE_COUNT=0
-
-          if [[ "$IS_FRESH" == true ]]; then
-            LOG_SOURCE=$(git log --pretty=format:"%H%x1f%s%x1f%an" -1 "$COMMIT_SHA" 2>/dev/null)
-          else
-            LOG_SOURCE=$(git log --pretty=format:"%H%x1f%s%x1f%an" "$RANGE_LOG" 2>/dev/null)
-          fi
-
-          echo "::group::Debug LOG_SOURCE raw"
-          printf '%s\n' "$LOG_SOURCE"
-          echo "::endgroup::"
-
-          while IFS=$'\x1f' read -r c_hash c_subject c_author; do
-            [[ -z "$c_hash" ]] && continue
-            LINE_COUNT=$((LINE_COUNT + 1))
-            if [[ $LINE_COUNT -le $MAX_LINES ]]; then
-              SHORT="${c_hash:0:7}"
-              LINE="[\`${SHORT}\`](${REPO_URL}/commit/${c_hash}) ${c_subject} — ${c_author}"
-              COMMIT_LIST="${COMMIT_LIST}${LINE}"$'\n'
-            fi
-          done < <(printf '%s\n' "$LOG_SOURCE")
-
-          if [[ $TOTAL_COMMITS -gt $MAX_LINES ]]; then
-            REMAINING=$((TOTAL_COMMITS - MAX_LINES))
-            COMMIT_LIST="${COMMIT_LIST}"$'\n'"_...and ${REMAINING} more commit(s)_"
-          fi
-
-          # Fallback kalau list kosong (safety net)
-          if [[ -z "$COMMIT_LIST" ]]; then
-            COMMIT_LIST="No commit details available."
-          fi
-
           if [[ "$BRANCH" == "master" ]]; then
             COLOR=5763719
           elif [[ "$BRANCH" == "dev" ]]; then
@@ -117,68 +78,142 @@ jobs:
             echo "color=$COLOR"
             echo "total_commits=$TOTAL_COMMITS"
             echo "files_changed=$FILES_CHANGED"
+            echo "range_log=$RANGE_LOG"
+            echo "is_fresh=$IS_FRESH"
           } >> $GITHUB_OUTPUT
 
-          # Multi-line output butuh delimiter khusus
-          {
-            echo "commit_list<<COMMITLIST_EOF"
-            echo "$COMMIT_LIST"
-            echo "COMMITLIST_EOF"
-          } >> $GITHUB_OUTPUT
-
-      - name: Send Discord Notification
+      - name: Send Discord Notification (batched)
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           ROLE_ID: ${{ secrets.DISCORD_ROLE_ID }}
           REPO_NAME: ${{ steps.commit_info.outputs.repo_name }}
           COMMIT_URL: ${{ steps.commit_info.outputs.commit_url }}
           COLOR: ${{ steps.commit_info.outputs.color }}
-          COMMIT_LIST: ${{ steps.commit_info.outputs.commit_list }}
           BRANCH: ${{ steps.commit_info.outputs.branch }}
           TOTAL_COMMITS: ${{ steps.commit_info.outputs.total_commits }}
           FILES_CHANGED: ${{ steps.commit_info.outputs.files_changed }}
           PUSHED_BY: ${{ github.actor }}
           COMPARE_URL: ${{ steps.commit_info.outputs.compare_url }}
           REPO_FULL: ${{ github.repository }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          ORG_AVATAR: https://github.com/${{ github.repository_owner }}.png
+          RANGE_LOG: ${{ steps.commit_info.outputs.range_log }}
+          IS_FRESH: ${{ steps.commit_info.outputs.is_fresh }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           MENTION="<@&$ROLE_ID>"
+          CHUNK_SIZE=10
 
-          echo "::group::Debug commit_list raw"
-          echo "$COMMIT_LIST"
-          echo "::endgroup::"
+          # Truncate subject: max 40 char, potong di batas kata,
+          # lalu tempel "..." + kata terakhir dari subject asli
+          truncate_subject() {
+            local subject="$1"
+            local limit=40
 
-          PAYLOAD=$(jq -n \
-            --arg mention "$MENTION" \
-            --arg repo_name "$REPO_NAME" \
-            --arg commit_url "$COMMIT_URL" \
-            --arg color "$COLOR" \
-            --arg commit_list "$COMMIT_LIST" \
-            --arg branch "\`$BRANCH\`" \
-            --arg total_commits "\`$TOTAL_COMMITS commit(s)\`" \
-            --arg files_changed "\`$FILES_CHANGED file(s)\`" \
-            --arg pushed_by "$PUSHED_BY" \
-            --arg compare "[View Diff]($COMPARE_URL)" \
-            --arg footer "GitHub Actions • $REPO_FULL" \
-            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{
-              "username": "GitHub Notifier",
-              "avatar_url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-              "content": $mention,
-              "embeds": [{
-                "title": $repo_name,
-                "url": $commit_url,
-                "color": ($color | tonumber),
-                "description": $commit_list,
-                "fields": [
-                  { "name": "🌿 Branch", "value": $branch, "inline": true },
-                  { "name": "📝 Commits", "value": $total_commits, "inline": true },
-                  { "name": "📁 Files Changed", "value": $files_changed, "inline": true },
-                  { "name": "🚀 Pushed by", "value": $pushed_by, "inline": true },
-                  { "name": "🔗 Compare", "value": $compare, "inline": true }
-                ],
-                "footer": { "text": $footer },
-                "timestamp": $timestamp
-              }]
-            }')
+            if [[ ${#subject} -le $limit ]]; then
+              echo "$subject"
+              return
+            fi
 
-          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
+            local cut="${subject:0:$limit}"
+            local trimmed="${cut% *}"
+            if [[ "$trimmed" == "$cut" && "$cut" != *" "* ]]; then
+              trimmed="$cut"
+            fi
+
+            local last_word="${subject##* }"
+            echo "${trimmed}...${last_word}"
+          }
+
+          # Ambil semua commit dalam range, urutan lama -> baru
+          if [[ "$IS_FRESH" == "true" ]]; then
+            mapfile -t ALL_HASHES < <(git log --reverse --pretty=format:"%H" -1 "$COMMIT_SHA" 2>/dev/null)
+            mapfile -t ALL_SUBJECTS < <(git log --reverse --pretty=format:"%s" -1 "$COMMIT_SHA" 2>/dev/null)
+          else
+            mapfile -t ALL_HASHES < <(git log --reverse --pretty=format:"%H" $RANGE_LOG 2>/dev/null)
+            mapfile -t ALL_SUBJECTS < <(git log --reverse --pretty=format:"%s" $RANGE_LOG 2>/dev/null)
+          fi
+
+          ACTUAL_TOTAL=${#ALL_HASHES[@]}
+          if [[ $ACTUAL_TOTAL -eq 0 ]]; then
+            ACTUAL_TOTAL=1
+          fi
+
+          TOTAL_CHUNKS=$(( (ACTUAL_TOTAL + CHUNK_SIZE - 1) / CHUNK_SIZE ))
+          if [[ $TOTAL_CHUNKS -lt 1 ]]; then
+            TOTAL_CHUNKS=1
+          fi
+
+          for (( batch=0; batch<TOTAL_CHUNKS; batch++ )); do
+            START=$(( batch * CHUNK_SIZE ))
+            BATCH_NUM=$(( batch + 1 ))
+
+            BATCH_LIST=""
+            for (( i=START; i<START+CHUNK_SIZE && i<ACTUAL_TOTAL; i++ )); do
+              HASH="${ALL_HASHES[$i]}"
+              SHORT="${HASH:0:7}"
+              SUBJ=$(truncate_subject "${ALL_SUBJECTS[$i]}")
+              LINE="[\`${SHORT}\`](${REPO_URL}/commit/${HASH}) ${SUBJ}"
+              BATCH_LIST="${BATCH_LIST}${LINE}"$'\n'
+            done
+
+            if [[ -z "$BATCH_LIST" ]]; then
+              BATCH_LIST="No commit details available."
+            fi
+
+            # Title: tambahkan (Part X/Y) hanya kalau lebih dari 1 batch
+            if [[ $TOTAL_CHUNKS -gt 1 ]]; then
+              TITLE="${REPO_NAME} (Part ${BATCH_NUM}/${TOTAL_CHUNKS})"
+            else
+              TITLE="$REPO_NAME"
+            fi
+
+            # Mention role hanya di notif pertama, biar gak spam ping tiap batch
+            if [[ $batch -eq 0 ]]; then
+              CONTENT="$MENTION"
+            else
+              CONTENT=""
+            fi
+
+            PAYLOAD=$(jq -n \
+              --arg content "$CONTENT" \
+              --arg title "$TITLE" \
+              --arg commit_url "$COMMIT_URL" \
+              --arg color "$COLOR" \
+              --arg commit_list "$BATCH_LIST" \
+              --arg branch "\`$BRANCH\`" \
+              --arg total_commits "\`$TOTAL_COMMITS commit(s)\`" \
+              --arg files_changed "\`$FILES_CHANGED file(s)\`" \
+              --arg pushed_by "$PUSHED_BY" \
+              --arg compare "[View Diff]($COMPARE_URL)" \
+              --arg footer "GitHub Actions • $REPO_FULL" \
+              --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg avatar_url "$ORG_AVATAR" \
+              '{
+                "username": "Orienscape Studios",
+                "avatar_url": $avatar_url,
+                "content": $content,
+                "embeds": [{
+                  "title": $title,
+                  "url": $commit_url,
+                  "color": ($color | tonumber),
+                  "description": $commit_list,
+                  "fields": [
+                    { "name": "🌿 Branch", "value": $branch, "inline": true },
+                    { "name": "📝 Commits", "value": $total_commits, "inline": true },
+                    { "name": "📁 Files Changed", "value": $files_changed, "inline": true },
+                    { "name": "🚀 Pushed by", "value": $pushed_by, "inline": true },
+                    { "name": "🔗 Compare", "value": $compare, "inline": true }
+                  ],
+                  "footer": { "text": $footer },
+                  "timestamp": $timestamp
+                }]
+              }')
+
+            curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
+
+            # Jeda kecil antar batch biar aman dari rate limit Discord webhook
+            if [[ $BATCH_NUM -lt $TOTAL_CHUNKS ]]; then
+              sleep 1
+            fi
+          done
