@@ -168,8 +168,8 @@ jobs:
               TITLE="$REPO_NAME"
             fi
 
-            # Mention role hanya di notif pertama, biar gak spam ping tiap batch
-            if [[ $batch -eq 0 ]]; then
+            # Mention role hanya saat push ke master, di notif pertama saja
+            if [[ "$BRANCH" == "master" && $batch -eq 0 ]]; then
               CONTENT="$MENTION"
             else
               CONTENT=""
